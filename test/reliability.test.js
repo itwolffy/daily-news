@@ -43,6 +43,10 @@ test('Zhihu collector rejects API URLs and falls back to the related question UR
   );
 });
 
+test('Zhihu collector does not invent a question URL from an answer ID', () => {
+  assert.equal(zhihuPublicUrl('', { id: 456, type: 'answer' }, 456), '');
+});
+
 test('daily run lock is token-owned and completed runs cannot be claimed again', async () => {
   const day = '2099-01-01';
   const token = await store.claimDailyRun(day);
