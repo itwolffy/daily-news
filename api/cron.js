@@ -17,10 +17,15 @@ function authorized(req) {
   return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
 }
 
-async function sendTelegram(messages, onSent) {
+function telegramCredentials() {
   const token = (process.env.TG_BOT_TOKEN || '').trim();
   const chat = (process.env.TG_CHAT_ID || '').trim();
   if (!token || !chat) throw new Error('Telegram credentials are not configured');
+  return { token, chat };
+}
+
+async function sendTelegram(messages, onSent) {
+  const { token, chat } = telegramCredentials();
   const path = token.startsWith('bot') ? token : 'bot' + token;
 
   for (let index = 0; index < messages.length; index += 1) {
@@ -69,6 +74,8 @@ module.exports = async function cronHandler(req, res) {
     const messages = buildMessages({ dateHeader: beijingHeader(), headerBar, curation });
     if (!messages.length) throw new Error('No Telegram messages generated');
 
+    // Validate local configuration before entering the ambiguous-delivery state.
+    telegramCredentials();
     // Persist the sending state before the first network request. Once this succeeds,
     // any transport error may have an ambiguous delivery result and the lock must be retained.
     await store.updateDailyRun(dateKey, lockToken, { status: 'sending', sentMessageCount: 0 });
