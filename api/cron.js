@@ -1,28 +1,3 @@
-// 放在 module.exports 上方：记录最近一次触发时间戳（防并发连发）
-let lastTriggeredAt = 0;
-
-module.exports = async (req, res) => {
-  // 1. 只允许 GET 请求（拦截 HEAD 链接预览探测与 OPTIONS 请求）
-  if (req.method && req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
-
-  // 2. 拦截浏览器地址栏的预加载 (Prefetch / Prerender) 请求
-  const purpose = req.headers?.['purpose'] || req.headers?.['sec-purpose'] || '';
-  if (/prefetch|preview|prerender/i.test(purpose)) {
-    return res.status(204).end();
-  }
-
-  // 3. 60 秒防重锁：防止浏览器超时重试导致连发多条
-  const now = Date.now();
-  if (now - lastTriggeredAt < 60 * 1000) {
-    return res.status(429).json({
-      success: false,
-      message: '请求过于频繁，60秒内已触发过一次推送'
-    });
-  }
-  lastTriggeredAt = now;
-
 const axios = require('axios');
 
 // 复用 axios 实例并配置模拟浏览器请求头
