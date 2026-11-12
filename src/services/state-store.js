@@ -31,28 +31,40 @@ function keys(day) {
 async function claimDailyRun(day) {
   const token = crypto.randomUUID();
   const key = keys(day);
+  const initialState = {
+    status: 'claimed',
+    sentMessageCount: 0,
+    updatedAt: new Date().toISOString()
+  };
+
   if (!config()) {
     const state = runStates.get(key.state);
     if (locks.has(key.lock) || (state && ['sending', 'delivery_unknown', 'sent', 'completed'].includes(state.status))) return null;
     locks.set(key.lock, token);
-    runStates.set(key.state, { status: 'claimed', sentMessageCount: 0, updatedAt: new Date().toISOString() });
+    runStates.set(key.state, initialState);
     return token;
   }
 
-  const previous = await command(['GET', key.state]);
-  if (previous) {
-    try {
-      const state = JSON.parse(previous);
-      if (['sending', 'delivery_unknown', 'sent', 'completed'].includes(state.status)) return null;
-    } catch {
-      // An unreadable state is treated conservatively below by retaining the existing lock.
-      return null;
-    }
-  }
-  const result = await command(['SET', key.lock, token, 'EX', 7200, 'NX']);
-  if (result !== 'OK') return null;
-  await updateDailyRun(day, token, { status: 'claimed', sentMessageCount: 0 });
-  return token;
+  // Check the previous state and acquire the lock in one Redis transaction.
+  // This prevents a failed state write from leaving an orphaned lock.
+  const script = [
+    "local previous = redis.call('GET', KEYS[2])",
+    'if previous then',
+    '  local ok, state = pcall(cjson.decode, previous)',
+    '  if not ok then return 0 end',
+    "  local status = state['status']",
+    "  if status == 'sending' or status == 'delivery_unknown' or status == 'sent' or status == 'completed' then return 0 end",
+    'end',
+    "local acquired = redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2], 'NX')",
+    "if not acquired then return 0 end",
+    "redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[4])",
+    'return 1'
+  ].join('\n');
+  const result = await command([
+    'EVAL', script, '2', key.lock, key.state,
+    token, '7200', JSON.stringify(initialState), '172800'
+  ]);
+  return Number(result) === 1 ? token : null;
 }
 
 async function updateDailyRun(day, token, progress) {
