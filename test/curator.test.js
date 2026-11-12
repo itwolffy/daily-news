@@ -1,0 +1,4 @@
+const test=require('node:test');const assert=require('node:assert/strict');const {parseModelJson,validateCuration}=require('../src/services/ai-curator');const news=[{id:'valid-1',source:'HN',url:'https://example.com',title:'Real title',summary:'Facts',category:'developer'}];
+test('parses JSON and rejects malformed output',()=>{assert.deepEqual(parseModelJson('{"events":[]}'),{events:[]});assert.equal(parseModelJson('not json'),null);});
+test('resolves model source IDs only against collected records',()=>{const r=validateCuration({dailyInsight:'Insight',topEventIds:['event-1'],events:[{sourceIds:['valid-1','forged-id'],title:'Curated title',category:'finance',importance:9}]},news);assert.equal(r.events.length,1);assert.equal(r.events[0].sources[0].url,'https://example.com');assert.equal(r.events[0].importance,5);});
+test('rejects invalid response structure',()=>assert.equal(validateCuration({events:{}},news),null));
