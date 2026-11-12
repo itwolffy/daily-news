@@ -6,6 +6,9 @@ const { normalizeNews } = require('../src/services/news-pipeline');
 const { zhihuPublicUrl } = require('../src/collectors/community');
 const store = require('../src/services/state-store');
 
+// Keep this unit test deterministic even if CI provides Redis credentials.
+['UPSTASH_REDIS_REST_URL', 'UPSTASH_REDIS_REST_TOKEN', 'KV_REST_API_URL', 'KV_REST_API_TOKEN'].forEach(key => delete process.env[key]);
+
 test('invalid and out-of-range timestamps are rejected instead of producing Invalid Date', () => {
   assert.equal(parseTimestamp('not-a-date'), null);
   assert.equal(parseTimestamp(Number.MAX_VALUE), null);
