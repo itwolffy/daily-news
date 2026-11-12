@@ -149,3 +149,57 @@ test('Telegram marks a definite 4xx rejection separately from an ambiguous netwo
     else process.env.TG_CHAT_ID = previousChat;
   }
 });
+
+
+test('Redis claim attempts token-checked cleanup when the claim response is lost', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const previousEnv = {
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN
+  };
+  const commands = [];
+  try {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.example.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+    axios.post = async (_url, args) => {
+      commands.push(args);
+      if (commands.length === 1) throw new Error('connection reset after request');
+      return { data: { result: 1 } };
+    };
+    await assert.rejects(store.claimDailyRun('2099-01-03'), /connection reset/);
+    assert.equal(commands.length, 2);
+    assert.equal(commands[0][0], 'EVAL');
+    assert.equal(commands[1][0], 'EVAL');
+    assert.match(commands[1][1], /redis\.call\('DEL', KEYS\[1\]\)/);
+  } finally {
+    axios.post = originalPost;
+    if (previousEnv.url === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = previousEnv.url;
+    if (previousEnv.token === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = previousEnv.token;
+  }
+});
+
+test('Telegram network errors remain ambiguous', async () => {
+  const axios = require('axios');
+  const { sendTelegram } = require('../api/cron');
+  const originalPost = axios.post;
+  const previousToken = process.env.TG_BOT_TOKEN;
+  const previousChat = process.env.TG_CHAT_ID;
+  try {
+    process.env.TG_BOT_TOKEN = 'test-token';
+    process.env.TG_CHAT_ID = 'test-chat';
+    axios.post = async () => { throw new Error('socket timeout'); };
+    await assert.rejects(
+      sendTelegram(['digest'], async () => {}),
+      error => error.deliveryOutcome === 'unknown'
+    );
+  } finally {
+    axios.post = originalPost;
+    if (previousToken === undefined) delete process.env.TG_BOT_TOKEN;
+    else process.env.TG_BOT_TOKEN = previousToken;
+    if (previousChat === undefined) delete process.env.TG_CHAT_ID;
+    else process.env.TG_CHAT_ID = previousChat;
+  }
+});
