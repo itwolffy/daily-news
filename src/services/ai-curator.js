@@ -17,7 +17,8 @@ function validateCuration(payload, news) {
     sourceIds.forEach(id => used.add(id));
     const category = ALLOWED_CATEGORIES.has(event.category) ? event.category : byId.get(sourceIds[0]).category;
     events.push({
-      id: 'event-' + (index+1), title: String(event.title || byId.get(sourceIds[0]).title).trim().slice(0,140),
+      id: 'event-' + (index+1), eventKey: typeof event.eventKey === 'string' ? event.eventKey : '',
+      title: String(event.title || byId.get(sourceIds[0]).title).trim().slice(0,140),
       summary: String(event.summary || '').trim().slice(0,500),
       whyItMatters: String(event.whyItMatters || '').trim().slice(0,300),
       watchNext: String(event.watchNext || '').trim().slice(0,200),
@@ -32,7 +33,7 @@ function validateCuration(payload, news) {
       watchNext:'', category:item.category, importance:2, updateType:'new', sources:[item] });
   });
   const requestedTop = Array.isArray(payload.topEventIds) ? payload.topEventIds : [];
-  const topStories = [...new Set(requestedTop)].map(id => events.find(e => e.id === id)).filter(Boolean);
+  const topStories = [...new Set(requestedTop)].map(key => events.find(e => e.id === key || (e.eventKey && e.eventKey === key))).filter(Boolean);
   return {
     dailyInsight: typeof payload.dailyInsight === 'string' ? payload.dailyInsight.trim().slice(0,180) : '',
     events, topStories: topStories.slice(0,3)
