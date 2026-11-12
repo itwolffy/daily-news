@@ -3,6 +3,7 @@ name: Test
 on:
   push:
     branches:
+      - main
       - feat/daily-news-2.0
   pull_request:
     branches:
