@@ -24,17 +24,55 @@ function telegramCredentials() {
   return { token, chat };
 }
 
+function telegramError(message, deliveryOutcome) {
+  const error = new Error(message);
+  error.deliveryOutcome = deliveryOutcome;
+  return error;
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function sendTelegram(messages, onSent) {
   const { token, chat } = telegramCredentials();
   const path = token.startsWith('bot') ? token : 'bot' + token;
 
   for (let index = 0; index < messages.length; index += 1) {
-    const response = await axios.post(
-      'https://api.telegram.org/' + path + '/sendMessage',
-      { chat_id: chat, text: messages[index], parse_mode: 'HTML', disable_web_page_preview: true },
-      { timeout: 12000 }
-    );
-    if (!response.data || response.data.ok !== true) throw new Error('Telegram API rejected a message');
+    let response;
+    let attempt = 0;
+    while (true) {
+      try {
+        response = await axios.post(
+          'https://api.telegram.org/' + path + '/sendMessage',
+          { chat_id: chat, text: messages[index], parse_mode: 'HTML', disable_web_page_preview: true },
+          { timeout: 12000 }
+        );
+        break;
+      } catch (error) {
+        const status = error.response && error.response.status;
+        if (status === 429 && attempt < 2) {
+          const retryAfter = Number(error.response.data && error.response.data.parameters &&
+            error.response.data.parameters.retry_after);
+          const delayMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000;
+          // Keep retries bounded so a rate limit cannot consume the entire serverless invocation.
+          if (delayMs <= 10000) {
+            attempt += 1;
+            await wait(delayMs);
+            continue;
+          }
+        }
+        if (status >= 400 && status < 500) {
+          throw telegramError('Telegram rejected a message (HTTP ' + status + ')', 'rejected');
+        }
+        // Network errors and server-side errors may have happened after Telegram accepted the message.
+        throw telegramError('Telegram delivery outcome is unknown', 'unknown');
+      }
+    }
+
+    if (!response.data || response.data.ok !== true) {
+      throw telegramError('Telegram API rejected a message', 'rejected');
+    }
     // Persist each acknowledged message before attempting the next one.
     await onSent(index + 1);
   }
@@ -51,6 +89,7 @@ module.exports = async function cronHandler(req, res) {
   let lockToken = null;
   let deliveryStarted = false;
   let sentMessageCount = 0;
+  let sentStatePersisted = false;
 
   try {
     lockToken = await store.claimDailyRun(dateKey);
@@ -76,8 +115,7 @@ module.exports = async function cronHandler(req, res) {
 
     // Validate local configuration before entering the ambiguous-delivery state.
     telegramCredentials();
-    // Persist the sending state before the first network request. Once this succeeds,
-    // any transport error may have an ambiguous delivery result and the lock must be retained.
+    // Persist the sending state before the first network request.
     await store.updateDailyRun(dateKey, lockToken, { status: 'sending', sentMessageCount: 0 });
     deliveryStarted = true;
     await sendTelegram(messages, async count => {
@@ -86,6 +124,7 @@ module.exports = async function cronHandler(req, res) {
     });
 
     await store.updateDailyRun(dateKey, lockToken, { status: 'sent', sentMessageCount });
+    sentStatePersisted = true;
     await store.saveRecentEvents(curation.events, dateKey);
     await store.completeDailyRun(dateKey, lockToken);
 
@@ -110,9 +149,12 @@ module.exports = async function cronHandler(req, res) {
   } catch (error) {
     console.error('[CronError]', error.message, 'durationMs=' + (Date.now() - started));
     if (lockToken) {
-      if (deliveryStarted) {
-        // Never release a lock after a send attempt: Telegram has no idempotency key.
-        // Keeping the run blocked is safer than silently duplicating a partially delivered digest.
+      const definitelyRejectedBeforeAnyDelivery =
+        deliveryStarted && error.deliveryOutcome === 'rejected' && sentMessageCount === 0;
+      if (sentStatePersisted) {
+        // The complete digest was acknowledged and its sent state persisted; keep that state.
+      } else if (deliveryStarted && !definitelyRejectedBeforeAnyDelivery) {
+        // Never release a lock after an ambiguous or partially completed send.
         try {
           await store.updateDailyRun(dateKey, lockToken, {
             status: 'delivery_unknown',
@@ -123,6 +165,7 @@ module.exports = async function cronHandler(req, res) {
           console.error('[DeliveryStateError]', stateError.message);
         }
       } else {
+        // A definite Telegram 4xx rejection before the first acknowledged message is safe to retry.
         try {
           await store.releaseDailyRun(dateKey, lockToken);
         } catch (releaseError) {
