@@ -1,16 +1,20 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+function validDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 function parseTimestamp(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number' && Number.isFinite(value)) {
-    return new Date(value < 1e12 ? value * 1000 : value);
+    return validDate(value < 1e12 ? value * 1000 : value);
   }
   const numeric = Number(value);
   if (String(value).trim() !== '' && Number.isFinite(numeric) && numeric > 0) {
-    return new Date(numeric < 1e12 ? numeric * 1000 : numeric);
+    return validDate(numeric < 1e12 ? numeric * 1000 : numeric);
   }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return validDate(value);
 }
 
 function beijingDate(date = new Date()) {
