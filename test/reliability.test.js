@@ -79,9 +79,9 @@ test('Redis claim checks prior state and acquires lock in one atomic EVAL', asyn
     assert.equal(typeof token, 'string');
     assert.equal(command[0], 'EVAL');
     assert.equal(command[2], '2');
-    assert.match(command[3], /redis\.call\('GET', KEYS\[2\]\)/);
-    assert.match(command[3], /redis\.call\('SET', KEYS\[1\].*'NX'/);
-    assert.match(command[3], /redis\.call\('SET', KEYS\[2\]/);
+    assert.match(command[1], /redis\.call\('GET', KEYS\[2\]\)/);
+    assert.match(command[1], /redis\.call\('SET', KEYS\[1\].*'NX'/);
+    assert.match(command[1], /redis\.call\('SET', KEYS\[2\]/);
   } finally {
     axios.post = originalPost;
     if (previousEnv.url === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
