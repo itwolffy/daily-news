@@ -12,12 +12,17 @@ test('parses JSON and rejects malformed output',()=>{
  assert.equal(parseModelJson('not json'),null);
 });
 test('resolves model source IDs only against collected records and labels multiple domains as reports',()=>{
- const r=validateCuration({dailyInsight:'今日洞察',topEventIds:['event-1'],events:[{sourceIds:['valid-1','valid-2','forged-id'],title:'中文标题',summary:'中文摘要',category:'finance',importance:9}]},news);
+ const r=validateCuration({dailyInsight:'今日洞察',topEventIds:['event-1'],events:[{sourceIds:['valid-1','valid-2','forged-id'],title:'中文标题',summary:'中文摘要',category:'finance',evidenceStatus:'多来源报道',importance:9}]},news);
  assert.equal(r.events.length,1);
  assert.equal(r.events[0].sources.length,2);
  assert.equal(r.events[0].evidenceStatus,'多来源报道');
  assert.equal(r.events[0].sourceCount,2);
  assert.equal(r.events[0].importance,5);
+});
+test('different domains from the same collector source are not promoted to multi-source reporting',()=>{
+ const samePublisherNews=[news[0],{...news[0],id:'valid-3',url:'https://mirror.example.org/story'}];
+ const r=validateCuration({events:[{sourceIds:['valid-1','valid-3'],title:'中文标题',summary:'中文摘要',evidenceStatus:'多来源报道'}]},samePublisherNews);
+ assert.equal(r.events[0].evidenceStatus,'媒体报道');
 });
 test('high-risk personal or national-security allegations are always marked unverified',()=>{
  const r=validateCuration({events:[{sourceIds:['valid-1','valid-2'],title:'高管涉及间谍指控',summary:'媒体称其涉嫌间谍活动，但相关说法尚未独立核实',evidenceStatus:'多来源报道'}]},news);

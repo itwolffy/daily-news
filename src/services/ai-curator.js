@@ -40,12 +40,14 @@ function validateCuration(payload, news) {
     sourceIds.forEach(id => used.add(id));
     const category = ALLOWED_CATEGORIES.has(event.category) ? event.category : sources[0].category;
     const hosts = sourceHosts(sources);
+    const sourceNames = new Set(sources.map(source => String(source.source || '').trim().toLowerCase()).filter(Boolean));
     const requestedStatus = EVIDENCE_STATUSES.has(event.evidenceStatus) ? event.evidenceStatus : '媒体报道';
     const sensitiveClaim = HIGH_RISK_CLAIM.test(title+' '+summary);
-    // Multiple domains indicate multiple reports, not proof. High-risk allegations always remain unverified.
+    // Distinct domains alone do not establish independent reporting; require distinct collector source identities too.
+    const independentlyAttributed = requestedStatus === '多来源报道' && hosts.size >= 2 && sourceNames.size >= 2;
     const evidenceStatus = sensitiveClaim || requestedStatus === '未经独立核实'
       ? '未经独立核实'
-      : (requestedStatus === '分析判断' ? '分析判断' : (hosts.size >= 2 ? '多来源报道' : '媒体报道'));
+      : (requestedStatus === '分析判断' ? '分析判断' : (independentlyAttributed ? '多来源报道' : '媒体报道'));
     events.push({
       id: 'event-' + (index+1), eventKey: typeof event.eventKey === 'string' ? event.eventKey : '',
       title: title.slice(0,140), summary: summary.slice(0,500),
