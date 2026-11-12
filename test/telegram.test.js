@@ -1,0 +1,4 @@
+const test=require('node:test');const assert=require('node:assert/strict');const {escapeHtml,safeUrl,chunkBlocks,buildMessages}=require('../src/renderers/telegram');
+test('escapes HTML and rejects unsafe links',()=>{assert.equal(escapeHtml('<x & "y">'),'&lt;x &amp; "y"&gt;'.replace('"','&quot;').replace('"','&quot;'));assert.equal(safeUrl('javascript:alert(1)'),'');});
+test('chunks complete blocks and rejects oversized block',()=>{assert.deepEqual(chunkBlocks(['abc','def'],4),['abc','def']);assert.throws(()=>chunkBlocks(['12345'],4));});
+test('renders source links',()=>{const m=buildMessages({dateHeader:'2026-11-12',headerBar:'',curation:{dailyInsight:'Insight',topStories:[],events:[{id:'1',title:'News',summary:'Summary',whyItMatters:'Impact',watchNext:'Next',category:'aiTech',importance:4,sources:[{source:'HN',url:'https://example.com'}]}]}});assert.match(m.join(' '),/News/);assert.match(m.join(' '),/example\.com/);});

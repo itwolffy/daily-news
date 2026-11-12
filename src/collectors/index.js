@@ -1,0 +1,4 @@
+const {fetchHackerNews}=require('./hacker-news');const {fetchGitHubTrending}=require('./github');const {fetch36Kr}=require('./36kr');const {fetchWallstreetcn}=require('./wallstreetcn');const {fetchCommunity}=require('./community');const {fetchRss}=require('./rss');
+async function run(name,fn){try{const result=await fn();return {name,items:Array.isArray(result)?result:[],ok:true};}catch(e){console.error('[CollectorError] '+name,e.message);return {name,items:[],ok:false};}}
+async function collectAll(){const results=await Promise.all([run('Hacker News',fetchHackerNews),run('GitHub',fetchGitHubTrending),run('36氪',fetch36Kr),run('华尔街见闻',fetchWallstreetcn),run('知乎/V2EX',fetchCommunity),run('RSS',async()=>(await fetchRss()).items)]);return {items:results.flatMap(x=>x.items),stats:results.map(x=>({source:x.name,count:x.items.length,ok:x.ok}))};}
+module.exports={collectAll};

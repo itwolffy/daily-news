@@ -1,7 +1,19 @@
 {
   "name": "daily-news-bot",
-  "version": "1.0.0",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Daily curated news Telegram bot",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "vercel dev"
+  },
   "dependencies": {
     "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "vercel": "^39.2.0"
   }
 }
