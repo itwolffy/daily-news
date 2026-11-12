@@ -60,10 +60,22 @@ async function claimDailyRun(day) {
     "redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[4])",
     'return 1'
   ].join('\n');
-  const result = await command([
-    'EVAL', script, '2', key.lock, key.state,
-    token, '7200', JSON.stringify(initialState), '172800'
-  ]);
+  let result;
+  try {
+    result = await command([
+      'EVAL', script, '2', key.lock, key.state,
+      token, '7200', JSON.stringify(initialState), '172800'
+    ]);
+  } catch (error) {
+    // The Redis script may have executed even if its HTTP response was lost.
+    // Best-effort compare-and-delete avoids leaving an unowned lock behind.
+    try {
+      await releaseDailyRun(day, token);
+    } catch (releaseError) {
+      console.error('[ClaimCleanupError]', releaseError.message);
+    }
+    throw error;
+  }
   return Number(result) === 1 ? token : null;
 }
 
