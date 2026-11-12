@@ -12,7 +12,7 @@ test('parses JSON and rejects malformed output',()=>{
  assert.equal(parseModelJson('not json'),null);
 });
 test('resolves model source IDs only against collected records and labels multiple domains as reports',()=>{
- const r=validateCuration({dailyInsight:'今日洞察',topEventIds:['event-1'],events:[{sourceIds:['valid-1','valid-2','forged-id'],title:'中文标题',summary:'中文摘要',category:'finance',importance:9}]},news);
+ const r=validateCuration({dailyInsight:'今日洞察',topEventIds:['event-1'],events:[{sourceIds:['valid-1','valid-2','forged-id'],title:'中文标题',summary:'中文摘要',category:'finance',evidenceStatus:'多来源报道',importance:9}]},news);
  assert.equal(r.events.length,1);
  assert.equal(r.events[0].sources.length,2);
  assert.equal(r.events[0].evidenceStatus,'多来源报道');
