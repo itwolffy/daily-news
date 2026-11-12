@@ -1,5 +1,7 @@
 # Daily News Bot 2.0
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 A Vercel Cron job that collects technology, AI, business, finance and developer news, curates it with DeepSeek, and delivers a Telegram digest.
 
 ## Pipeline
