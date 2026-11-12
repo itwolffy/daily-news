@@ -22,8 +22,6 @@ function telegramCredentials() {
   const chat = (process.env.TG_CHAT_ID || '').trim();
   if (!token || !chat) throw new Error('Telegram credentials are not configured');
   return { token, chat };
-
-module.exports.sendTelegram = sendTelegram;
 }
 
 function telegramError(message, deliveryOutcome) {
@@ -178,3 +176,6 @@ module.exports = async function cronHandler(req, res) {
     return res.status(500).json({ success: false, error: 'Daily news job failed' });
   }
 };
+
+
+module.exports.sendTelegram = sendTelegram;
