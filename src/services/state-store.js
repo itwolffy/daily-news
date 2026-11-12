@@ -121,10 +121,13 @@ async function getRecentEvents() {
 
 async function saveRecentEvents(events, day) {
   if (!config()) return;
-  const old = await getRecentEvents();
+  // Do not overwrite the history with a partial snapshot when the Redis read fails.
+  const value = await command(['GET', 'daily-news:recent-events']);
+  const previous = value ? JSON.parse(value) : [];
+  if (!Array.isArray(previous)) throw new Error('Stored recent-event history is not an array');
   const next = events.map(event => ({
     title: event.title, category: event.category, summary: event.summary, date: day
-  })).concat(old).slice(0, 80);
+  })).concat(previous).slice(0, 80);
   await command(['SET', 'daily-news:recent-events', JSON.stringify(next), 'EX', 1209600]);
 }
 
