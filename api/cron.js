@@ -69,9 +69,10 @@ module.exports = async function cronHandler(req, res) {
     const messages = buildMessages({ dateHeader: beijingHeader(), headerBar, curation });
     if (!messages.length) throw new Error('No Telegram messages generated');
 
-    // From this point onward, any transport error may have an ambiguous delivery result.
-    deliveryStarted = true;
+    // Persist the sending state before the first network request. Once this succeeds,
+    // any transport error may have an ambiguous delivery result and the lock must be retained.
     await store.updateDailyRun(dateKey, lockToken, { status: 'sending', sentMessageCount: 0 });
+    deliveryStarted = true;
     await sendTelegram(messages, async count => {
       sentMessageCount = count;
       await store.updateDailyRun(dateKey, lockToken, { status: 'sending', sentMessageCount: count });
