@@ -1,5 +1,21 @@
 const { http } = require('../utils/http');
 
+function zhihuPublicUrl(rawUrl, target, fallbackId) {
+  if (typeof rawUrl === 'string' && rawUrl.trim()) {
+    try {
+      const url = new URL(rawUrl);
+      if (url.protocol === 'https:' && (url.hostname === 'www.zhihu.com' || url.hostname.endsWith('.zhihu.com')) &&
+          !url.hostname.startsWith('api.')) {
+        return url.href;
+      }
+    } catch {
+      // Fall back to the question URL when the upstream URL is malformed.
+    }
+  }
+  const questionId = target?.question?.id || (target?.type === 'question' ? target?.id : fallbackId);
+  return questionId ? 'https://www.zhihu.com/question/' + encodeURIComponent(String(questionId)) : '';
+}
+
 async function fetchCommunity() {
   const [zhihu, v2ex] = await Promise.allSettled([
     http.get('https://api.zhihu.com/topstory/hot-list?limit=10&reverse_order=0', {
@@ -13,17 +29,19 @@ async function fetchCommunity() {
     (zhihu.value.data?.data || []).slice(0, 6).forEach((entry, index) => {
       const target = entry?.target || entry;
       const id = target?.id || entry?.id || index;
-      const rawUrl = target?.url || '';
+      const rawUrl = target?.url || entry?.url || '';
+      const url = zhihuPublicUrl(rawUrl, target, target?.question?.id || id);
+      if (!url) return;
       result.push({
         source: '知乎',
         category: 'community',
         sourceId: String(id),
         title: target?.title || entry?.title || '',
-        url: 'https://www.zhihu.com/question/' + id,
+        url,
         summary: target?.excerpt || '',
         publishedAt: target?.created_time || target?.updated_time || null,
         metrics: { heat: Number(String(entry?.detail_text || '').replace(/[^\d.]/g, '')) || 0 },
-        meta: { originalUrl: rawUrl }
+        meta: { originalUrl: rawUrl || url }
       });
     });
   }
@@ -43,7 +61,7 @@ async function fetchCommunity() {
       });
     });
   }
-  return result.filter(x => x.title);
+  return result.filter(item => item.title);
 }
 
-module.exports = { fetchCommunity };
+module.exports = { fetchCommunity, zhihuPublicUrl };
