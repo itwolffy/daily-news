@@ -58,3 +58,94 @@ test('daily run lock is token-owned and completed runs cannot be claimed again',
   await store.completeDailyRun(day, token);
   assert.equal(await store.claimDailyRun(day), null);
 });
+
+
+test('Redis claim checks prior state and acquires lock in one atomic EVAL', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const previousEnv = {
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN
+  };
+  let command;
+  try {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.example.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+    axios.post = async (_url, args) => {
+      command = args;
+      return { data: { result: 1 } };
+    };
+    const token = await store.claimDailyRun('2099-01-02');
+    assert.equal(typeof token, 'string');
+    assert.equal(command[0], 'EVAL');
+    assert.equal(command[2], '2');
+    assert.match(command[3], /redis\.call\('GET', KEYS\[2\]\)/);
+    assert.match(command[3], /redis\.call\('SET', KEYS\[1\].*'NX'/);
+    assert.match(command[3], /redis\.call\('SET', KEYS\[2\]/);
+  } finally {
+    axios.post = originalPost;
+    if (previousEnv.url === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = previousEnv.url;
+    if (previousEnv.token === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = previousEnv.token;
+  }
+});
+
+test('Telegram retries a bounded 429 response and continues after success', async () => {
+  const axios = require('axios');
+  const { sendTelegram } = require('../api/cron');
+  const originalPost = axios.post;
+  const previousToken = process.env.TG_BOT_TOKEN;
+  const previousChat = process.env.TG_CHAT_ID;
+  let attempts = 0;
+  try {
+    process.env.TG_BOT_TOKEN = 'test-token';
+    process.env.TG_CHAT_ID = 'test-chat';
+    axios.post = async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        const error = new Error('rate limited');
+        error.response = { status: 429, data: { parameters: { retry_after: 0.001 } } };
+        throw error;
+      }
+      return { data: { ok: true } };
+    };
+    const checkpoints = [];
+    await sendTelegram(['digest'], async count => checkpoints.push(count));
+    assert.equal(attempts, 2);
+    assert.deepEqual(checkpoints, [1]);
+  } finally {
+    axios.post = originalPost;
+    if (previousToken === undefined) delete process.env.TG_BOT_TOKEN;
+    else process.env.TG_BOT_TOKEN = previousToken;
+    if (previousChat === undefined) delete process.env.TG_CHAT_ID;
+    else process.env.TG_CHAT_ID = previousChat;
+  }
+});
+
+test('Telegram marks a definite 4xx rejection separately from an ambiguous network error', async () => {
+  const axios = require('axios');
+  const { sendTelegram } = require('../api/cron');
+  const originalPost = axios.post;
+  const previousToken = process.env.TG_BOT_TOKEN;
+  const previousChat = process.env.TG_CHAT_ID;
+  try {
+    process.env.TG_BOT_TOKEN = 'test-token';
+    process.env.TG_CHAT_ID = 'test-chat';
+    axios.post = async () => {
+      const error = new Error('bad request');
+      error.response = { status: 400, data: { description: 'Bad Request' } };
+      throw error;
+    };
+    await assert.rejects(
+      sendTelegram(['digest'], async () => {}),
+      error => error.deliveryOutcome === 'rejected'
+    );
+  } finally {
+    axios.post = originalPost;
+    if (previousToken === undefined) delete process.env.TG_BOT_TOKEN;
+    else process.env.TG_BOT_TOKEN = previousToken;
+    if (previousChat === undefined) delete process.env.TG_CHAT_ID;
+    else process.env.TG_CHAT_ID = previousChat;
+  }
+});
