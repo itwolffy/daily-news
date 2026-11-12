@@ -12,7 +12,8 @@ function zhihuPublicUrl(rawUrl, target, fallbackId) {
       // Fall back to the question URL when the upstream URL is malformed.
     }
   }
-  const questionId = target?.question?.id || (target?.type === 'question' ? target?.id : fallbackId);
+  const isQuestion = target?.type === 'question' || !target?.type;
+  const questionId = target?.question?.id || (isQuestion ? (target?.id || fallbackId) : null);
   return questionId ? 'https://www.zhihu.com/question/' + encodeURIComponent(String(questionId)) : '';
 }
 
