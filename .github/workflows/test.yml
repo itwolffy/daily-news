@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/daily-news-2.0
   pull_request:
     branches:
       - main
@@ -16,6 +15,7 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout code
@@ -25,9 +25,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Run tests
         run: npm test
