@@ -1,7 +1,7 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
 const {parseModelJson,validateCuration,fallbackCuration,safeInsight}=require('../src/services/ai-curator');
-const {blockForEvent}=require('../src/renderers/telegram');
+const {blockForEvent}=require('../src/channels/telegram/formatter');
 const news=[
  {id:'valid-1',source:'HN',url:'https://news.example.com/story',title:'真实标题',summary:'真实摘要内容',category:'developer',score:80},
  {id:'valid-2',source:'Media B',url:'https://media-b.example.org/story',title:'另一来源标题',summary:'另一来源摘要',category:'developer',score:70},

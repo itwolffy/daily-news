@@ -1,0 +1,84 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { createDailyNewsJob } = require('../src/jobs/daily-news-job');
+
+function createDependencies(overrides = {}) {
+  const updates = [];
+  const calls = [];
+  const store = {
+    claimDailyRun: async () => 'lock-token',
+    updateDailyRun: async (_date, _token, state) => updates.push(state),
+    getRecentEvents: async () => [],
+    saveRecentEvents: async () => calls.push('saveRecentEvents'),
+    completeDailyRun: async () => calls.push('completeDailyRun'),
+    releaseDailyRun: async () => calls.push('releaseDailyRun'),
+    redisEnabled: () => true
+  };
+  const telegram = {
+    validateConfig: () => calls.push('validateConfig'),
+    deliver: async (_digest, { onSent }) => {
+      await onSent(1);
+      return { messageCount: 1 };
+    }
+  };
+  const deps = {
+    collectAll: async () => ({
+      items: [{ title: 'raw item' }],
+      stats: [{ source: 'test', count: 1, ok: true }]
+    }),
+    prepareNews: items => items,
+    curateNews: async () => ({ events: [{ id: 'event-1' }] }),
+    fallbackCuration: () => ({ events: [] }),
+    fetchHeaderBar: async () => '',
+    beijingHeader: () => '2026-11-16',
+    beijingDate: () => '2026-11-16',
+    store,
+    telegram,
+    ...overrides
+  };
+  return { deps, updates, calls };
+}
+
+test('daily job completes after the channel acknowledges delivery', async () => {
+  const { deps, updates, calls } = createDependencies();
+  const run = createDailyNewsJob(deps);
+
+  const result = await run();
+
+  assert.equal(result.success, true);
+  assert.equal(result.message_count, 1);
+  assert.deepEqual(updates.map(x => x.status), ['processing', 'sending', 'sending', 'sent']);
+  assert.deepEqual(calls, ['validateConfig', 'saveRecentEvents', 'completeDailyRun']);
+});
+
+test('daily job preserves the lock when delivery outcome is unknown', async () => {
+  const { deps, updates, calls } = createDependencies({
+    telegram: {
+      validateConfig: () => {},
+      deliver: async () => {
+        const error = new Error('network timeout');
+        error.deliveryOutcome = 'unknown';
+        throw error;
+      }
+    }
+  });
+  const run = createDailyNewsJob(deps);
+
+  await assert.rejects(run(), /network timeout/);
+
+  assert.equal(updates.at(-1).status, 'delivery_unknown');
+  assert.equal(calls.includes('releaseDailyRun'), false);
+});
+
+test('daily job reports a conflict when another run already owns the daily claim', async () => {
+  const { deps, updates } = createDependencies({
+    store: {
+      claimDailyRun: async () => null,
+      updateDailyRun: async (_date, _token, state) => updates.push(state)
+    }
+  });
+  const run = createDailyNewsJob(deps);
+
+  await assert.rejects(run(), error => error.statusCode === 409);
+  assert.equal(updates.length, 0);
+});

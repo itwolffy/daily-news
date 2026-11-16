@@ -93,7 +93,7 @@ test('Redis claim checks prior state and acquires lock in one atomic EVAL', asyn
 
 test('Telegram retries a bounded 429 response and continues after success', async () => {
   const axios = require('axios');
-  const { sendTelegram } = require('../api/cron');
+  const { sendTelegram } = require('../src/channels/telegram/client');
   const originalPost = axios.post;
   const previousToken = process.env.TG_BOT_TOKEN;
   const previousChat = process.env.TG_CHAT_ID;
@@ -125,7 +125,7 @@ test('Telegram retries a bounded 429 response and continues after success', asyn
 
 test('Telegram marks a definite 4xx rejection separately from an ambiguous network error', async () => {
   const axios = require('axios');
-  const { sendTelegram } = require('../api/cron');
+  const { sendTelegram } = require('../src/channels/telegram/client');
   const originalPost = axios.post;
   const previousToken = process.env.TG_BOT_TOKEN;
   const previousChat = process.env.TG_CHAT_ID;
@@ -183,7 +183,7 @@ test('Redis claim attempts token-checked cleanup when the claim response is lost
 
 test('Telegram network errors remain ambiguous', async () => {
   const axios = require('axios');
-  const { sendTelegram } = require('../api/cron');
+  const { sendTelegram } = require('../src/channels/telegram/client');
   const originalPost = axios.post;
   const previousToken = process.env.TG_BOT_TOKEN;
   const previousChat = process.env.TG_CHAT_ID;
