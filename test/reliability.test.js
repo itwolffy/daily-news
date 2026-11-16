@@ -203,3 +203,109 @@ test('Telegram network errors remain ambiguous', async () => {
     else process.env.TG_CHAT_ID = previousChat;
   }
 });
+
+
+test('Redis completion merges completed status without clearing delivery checkpoints', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const previousEnv = {
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN
+  };
+  let command;
+  try {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.example.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+    axios.post = async (_url, args) => {
+      command = args;
+      return { data: { result: 1 } };
+    };
+
+    await store.completeDailyRun('2099-01-04', 'owner-token');
+
+    assert.equal(command[0], 'EVAL');
+    assert.match(command[1], /redis\.call\('GET', KEYS\[2\]\)/);
+    assert.match(command[1], /state\.status = 'completed'/);
+    assert.doesNotMatch(command[1], /sentMessageCount = cjson\.null/);
+    assert.match(command[1], /cjson\.encode\(state\)/);
+  } finally {
+    axios.post = originalPost;
+    if (previousEnv.url === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = previousEnv.url;
+    if (previousEnv.token === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = previousEnv.token;
+  }
+});
+
+test('Redis progress updates merge into the existing run record', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const previousEnv = {
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN
+  };
+  let command;
+  try {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.example.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+    axios.post = async (_url, args) => {
+      command = args;
+      return { data: { result: 1 } };
+    };
+
+    await store.updateDailyRun('2099-01-05', 'owner-token', { historyStatus: 'saved' });
+
+    assert.equal(command[0], 'EVAL');
+    assert.match(command[1], /local raw = redis\.call\('GET', KEYS\[2\]\)/);
+    assert.match(command[1], /for key, value in pairs\(patch\) do state\[key\] = value end/);
+    assert.match(command[1], /cjson\.encode\(state\)/);
+  } finally {
+    axios.post = originalPost;
+    if (previousEnv.url === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = previousEnv.url;
+    if (previousEnv.token === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = previousEnv.token;
+  }
+});
+
+test('recent-event history replaces the same day before retrying the write', async () => {
+  const axios = require('axios');
+  const originalPost = axios.post;
+  const previousEnv = {
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN
+  };
+  let saved;
+  try {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.example.test';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+    axios.post = async (_url, args) => {
+      if (args[0] === 'GET') {
+        return {
+          data: {
+            result: JSON.stringify([
+              { title: 'old same-day event', date: '2099-01-06' },
+              { title: 'previous-day event', date: '2099-01-05' }
+            ])
+          }
+        };
+      }
+      if (args[0] === 'SET') saved = JSON.parse(args[2]);
+      return { data: { result: 'OK' } };
+    };
+
+    await store.saveRecentEvents([
+      { title: 'new same-day event', category: 'tech', summary: 'summary' }
+    ], '2099-01-06');
+
+    assert.equal(saved.filter(event => event.date === '2099-01-06').length, 1);
+    assert.equal(saved[0].title, 'new same-day event');
+    assert.equal(saved[1].title, 'previous-day event');
+  } finally {
+    axios.post = originalPost;
+    if (previousEnv.url === undefined) delete process.env.UPSTASH_REDIS_REST_URL;
+    else process.env.UPSTASH_REDIS_REST_URL = previousEnv.url;
+    if (previousEnv.token === undefined) delete process.env.UPSTASH_REDIS_REST_TOKEN;
+    else process.env.UPSTASH_REDIS_REST_TOKEN = previousEnv.token;
+  }
+});
