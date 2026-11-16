@@ -6,75 +6,101 @@ const { beijingHeader, beijingDate } = require('../utils/date');
 const store = require('../services/state-store');
 const telegram = require('../channels/telegram');
 
-async function runDailyNewsJob() {
+function createDailyNewsJob(dependencies = {}) {
+  const deps = {
+    collectAll,
+    prepareNews,
+    curateNews,
+    fallbackCuration,
+    fetchHeaderBar,
+    beijingHeader,
+    beijingDate,
+    store,
+    telegram,
+    ...dependencies
+  };
+  const {
+    collectAll: collect,
+    prepareNews: prepare,
+    curateNews: curate,
+    fallbackCuration: fallback,
+    fetchHeaderBar: fetchHeader,
+    beijingHeader: getDateHeader,
+    beijingDate: getDateKey,
+    store: stateStore,
+    telegram: channel
+  } = deps;
+
+  async function runDailyNewsJob() {
+
   const started = Date.now();
-  const dateKey = beijingDate();
+  const dateKey = getDateKey();
   let lockToken = null;
   let deliveryStarted = false;
   let sentMessageCount = 0;
   let sentStatePersisted = false;
 
   try {
-    lockToken = await store.claimDailyRun(dateKey);
+    lockToken = await stateStore.claimDailyRun(dateKey);
     if (!lockToken) {
       const error = new Error('Daily run already claimed or delivered');
       error.statusCode = 409;
       throw error;
     }
 
-    await store.updateDailyRun(dateKey, lockToken, {
+    await stateStore.updateDailyRun(dateKey, lockToken, {
       status: 'processing',
       sentMessageCount: 0
     });
 
     const [collected, headerBar, recent] = await Promise.all([
-      collectAll(),
-      fetchHeaderBar().catch(error => {
+      collect(),
+      fetchHeader().catch(error => {
         console.error('[HeaderError]', error.message);
         return '';
       }),
-      store.getRecentEvents()
+      stateStore.getRecentEvents()
     ]);
 
-    const news = prepareNews(collected.items);
+    const news = prepare(collected.items);
     if (!news.length) throw new Error('No valid news items collected');
 
-    const curated = await curateNews(news, recent);
-    const curation = curated || fallbackCuration(news);
+    const curated = await curate(news, recent);
+    const curation = curated || fallback(news);
     const digest = {
-      dateHeader: beijingHeader(),
+      dateHeader: getDateHeader(),
       headerBar,
       curation
     };
 
     // Validate local channel configuration before entering the ambiguous-delivery state.
-    telegram.validateConfig();
+    channel.validateConfig();
 
-    await store.updateDailyRun(dateKey, lockToken, {
+    await stateStore.updateDailyRun(dateKey, lockToken, {
       status: 'sending',
       sentMessageCount: 0
     });
     deliveryStarted = true;
 
-    const delivery = await telegram.deliver(digest, {
+    const delivery = await channel.deliver(digest, {
       onSent: async count => {
         sentMessageCount = count;
-        await store.updateDailyRun(dateKey, lockToken, {
+        await stateStore.updateDailyRun(dateKey, lockToken, {
           status: 'sending',
           sentMessageCount: count
         });
       }
     });
 
-    await store.updateDailyRun(dateKey, lockToken, {
+    await stateStore.updateDailyRun(dateKey, lockToken, {
       status: 'sent',
       sentMessageCount
     });
     sentStatePersisted = true;
 
     // History persistence must not cause an already delivered digest to be sent again.
-    await store.saveRecentEvents(curation.events, dateKey);
-    await store.completeDailyRun(dateKey, lockToken);
+    await stateStore.saveRecentEvents(curation.events, dateKey);
+    await stateStore.completeDailyRun(dateKey, lockToken);
 
     console.log(JSON.stringify({
       event: 'daily_news_completed',
@@ -83,7 +109,7 @@ async function runDailyNewsJob() {
       eventCount: curation.events.length,
       messageCount: delivery.messageCount,
       aiCurated: Boolean(curated),
-      redis: store.redisEnabled(),
+      redis: stateStore.redisEnabled(),
       collectorStats: collected.stats,
       durationMs: Date.now() - started
     }));
@@ -107,7 +133,7 @@ async function runDailyNewsJob() {
       } else if (deliveryStarted && !definitelyRejectedBeforeAnyDelivery) {
         // Never release a lock after an ambiguous or partially completed send.
         try {
-          await store.updateDailyRun(dateKey, lockToken, {
+          await stateStore.updateDailyRun(dateKey, lockToken, {
             status: 'delivery_unknown',
             sentMessageCount,
             error: 'Delivery or post-delivery persistence failed'
@@ -118,7 +144,7 @@ async function runDailyNewsJob() {
       } else {
         // A definite rejection before the first acknowledged message is safe to retry.
         try {
-          await store.releaseDailyRun(dateKey, lockToken);
+          await stateStore.releaseDailyRun(dateKey, lockToken);
         } catch (releaseError) {
           console.error('[LockReleaseError]', releaseError.message);
         }
@@ -127,6 +153,11 @@ async function runDailyNewsJob() {
 
     throw error;
   }
+  }
+
+  return runDailyNewsJob;
 }
 
-module.exports = { runDailyNewsJob };
+const runDailyNewsJob = createDailyNewsJob();
+
+module.exports = { createDailyNewsJob, runDailyNewsJob };
