@@ -159,16 +159,17 @@ With Redis configured:
 - After Telegram acknowledges each message, the acknowledged-message count is persisted.
 - A known Telegram 4xx rejection is treated as an explicit rejection. HTTP 429 responses receive bounded retries when the requested wait is no more than 10 seconds.
 - Network errors and server-side errors have an ambiguous outcome: Telegram may have accepted a message before the connection failed. Such runs are marked `delivery_unknown` and are not automatically retried. Check the destination chat before any manual retry; Telegram `sendMessage` does not provide a general idempotency key.
-- After every message is acknowledged, the run is marked `sent` before recent-event history is saved. A history-write failure therefore does not cause the digest to be sent again that day.
+- After every channel has acknowledged delivery, the run is marked `sent` with a `historyStatus: pending` checkpoint and the events needed for history persistence. A history-write failure therefore does not cause the digest to be sent again. The daily run record retains the pending history payload for diagnosis/recovery.
 
 These mechanisms reduce duplicate-delivery risk; they do not guarantee exactly-once delivery across all infrastructure failures.
 
 ### Channel state and partial delivery
 
 - The job validates the configuration of every configured channel before starting the first delivery, so a missing destination configuration is detected before any channel is sent a digest.
-- Channels are delivered sequentially. Their run-level states include `pending`, `sending`, `sent`, `rejected` and `delivery_unknown`; acknowledged message counts are checkpointed through the state store.
-- If a channel explicitly rejects delivery before any message has been acknowledged by any channel, the run can be released for a retry.
+- Channels are delivered sequentially. Their run-level states include `pending`, `sending`, `sent`, `rejected` and `delivery_unknown`; acknowledged message counts are checkpointed through the state store. A channel that acknowledges one or more messages and then fails is recorded as `delivery_unknown`, not `rejected`.
+- If a channel explicitly rejects delivery before any message has been acknowledged by any channel, the job first persists the `rejected` state and only then releases the lock. If that state write fails, the lock is retained.
 - If an earlier channel has already acknowledged messages and a later channel fails, or if delivery outcome is ambiguous, the run is retained as `delivery_unknown` rather than automatically replaying the entire digest. Check each destination before manually retrying.
+- Completion updates preserve the acknowledged-message counts and per-channel states. A history write failure leaves the run in `sent` with `historyStatus: pending` and the event payload recorded; it does not make delivery eligible for retry.
 - Channel state is part of the daily run record; this is not a separate permanent per-channel audit-history system.
 
 ## Data and content limitations
