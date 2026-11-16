@@ -159,7 +159,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
 - 每成功收到 Telegram 对一条消息的确认，就持久化已确认的消息数量。
 - Telegram 4xx 响应视为明确拒绝；HTTP 429 在要求等待时间不超过 10 秒时进行有限次数重试。
 - 网络错误和服务端错误可能发生在 Telegram 已接收消息之后，推送结果因此无法确定。此类任务会标记为 `delivery_unknown`，不会自动重试。手动重试前应先检查目标 Telegram 聊天记录；Telegram `sendMessage` 不提供通用幂等键。
-- 所有渠道均确认发送成功后，任务会先标记为 `sent`，同时记录 `historyStatus: pending` 和待保存的事件数据，再写入近期事件历史。历史写入失败不会导致当天早报重新发送；待写入数据会保留在每日任务状态中，供排查和恢复。
+- 所有渠道均确认发送成功后，任务会先标记为 `sent`，同时记录 `historyStatus: pending` 和待保存的事件数据，再写入近期事件历史。历史写入失败不会导致当天早报重新发送；待写入数据会保留在每日任务状态中，供人工排查和恢复；当前不会自动重试这一步历史写入。
 
 这些机制用于降低重复推送风险，但不能保证所有基础设施故障场景下都实现严格的 Exactly-once 投递。
 
