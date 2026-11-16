@@ -44,7 +44,7 @@ function getLink(entry) {
 
 function parseFeed(xml, feed) {
   const source = String(xml || '');
-  const entries = source.match(/<(?:[\\w.-]+:)?(item|entry)\\b[^>]*>[\\s\\S]*?<\\/(?:[\\w.-]+:)?\\1\\s*>/gi) || [];
+  const entries = source.match(/<(?:[\w.-]+:)?(item|entry)\b[^>]*>[\s\S]*?<\/(?:[\w.-]+:)?\1\s*>/gi) || [];
   return entries.slice(0, 12).map((entry, index) => {
     const title = getTag(entry, 'title');
     const url = getLink(entry);
