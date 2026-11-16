@@ -217,3 +217,37 @@ test('failure to persist sent state is retried as a state write, not downgraded 
   assert.equal(updates.some(state => state.status === 'delivery_unknown'), false);
   assert.equal(calls.includes('releaseDailyRun'), false);
 });
+
+
+test('a later channel rejection after an earlier channel succeeded keeps the whole run blocked', async () => {
+  const { deps, updates, calls } = createDependencies({
+    channels: [
+      {
+        name: 'telegram',
+        validateConfig: () => {},
+        deliver: async (_digest, { onSent }) => {
+          await onSent(1);
+          return { messageCount: 1 };
+        }
+      },
+      {
+        name: 'secondary',
+        validateConfig: () => {},
+        deliver: async () => {
+          const error = new Error('secondary rejected');
+          error.deliveryOutcome = 'rejected';
+          throw error;
+        }
+      }
+    ]
+  });
+
+  await assert.rejects(createDailyNewsJob(deps)(), /secondary rejected/);
+
+  const finalState = updates.at(-1);
+  assert.equal(finalState.status, 'delivery_unknown');
+  assert.equal(finalState.channelStates.telegram.status, 'sent');
+  assert.equal(finalState.channelStates.secondary.status, 'rejected');
+  assert.equal(finalState.sentMessageCount, 1);
+  assert.equal(calls.includes('releaseDailyRun'), false);
+});
