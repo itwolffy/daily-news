@@ -27,7 +27,7 @@ function getTag(block, name) {
     '<(?:[\\w.-]+:)?' + name + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?' + name + '\\s*>',
     'i'
   ));
-  return match ? decodeXml(match[1].replace(/<[^>]+>/g, ' ').trim()) : '';
+  return match ? decodeXml(match[1]).replace(/<[^>]+>/g, ' ').trim() : '';
 }
 
 function getLink(entry) {
