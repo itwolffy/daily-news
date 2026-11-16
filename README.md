@@ -159,7 +159,7 @@ With Redis configured:
 - After Telegram acknowledges each message, the acknowledged-message count is persisted.
 - A known Telegram 4xx rejection is treated as an explicit rejection. HTTP 429 responses receive bounded retries when the requested wait is no more than 10 seconds.
 - Network errors and server-side errors have an ambiguous outcome: Telegram may have accepted a message before the connection failed. Such runs are marked `delivery_unknown` and are not automatically retried. Check the destination chat before any manual retry; Telegram `sendMessage` does not provide a general idempotency key.
-- After every channel has acknowledged delivery, the run is marked `sent` with a `historyStatus: pending` checkpoint and the events needed for history persistence. A history-write failure therefore does not cause the digest to be sent again. The daily run record retains the pending history payload for diagnosis/recovery.
+- After every channel has acknowledged delivery, the run is marked `sent` with a `historyStatus: pending` checkpoint and the events needed for history persistence. A history-write failure therefore does not cause the digest to be sent again. The daily run record retains the pending history payload for manual diagnosis/recovery; the application does not automatically retry this history write.
 
 These mechanisms reduce duplicate-delivery risk; they do not guarantee exactly-once delivery across all infrastructure failures.
 
