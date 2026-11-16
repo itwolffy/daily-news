@@ -168,7 +168,23 @@ function createDailyNewsJob(dependencies = {}) {
             console.error('[DeliveryStateError]', stateError.message);
           }
         } else {
-          // A failure before any acknowledged delivery is safe to retry.
+          // A definite rejection before any acknowledged delivery is retryable.
+          const rejectedChannel = channels.find(channel => channelStates[channel.name].status === 'sending');
+          if (rejectedChannel && error.deliveryOutcome === 'rejected') {
+            channelStates[rejectedChannel.name] = {
+              status: 'rejected',
+              sentMessageCount: 0
+            };
+            try {
+              await stateStore.updateDailyRun(dateKey, lockToken, {
+                status: 'rejected',
+                sentMessageCount: 0,
+                channelStates: { ...channelStates }
+              });
+            } catch (stateError) {
+              console.error('[DeliveryStateError]', stateError.message);
+            }
+          }
           try {
             await stateStore.releaseDailyRun(dateKey, lockToken);
           } catch (releaseError) {
