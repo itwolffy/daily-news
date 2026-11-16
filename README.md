@@ -8,15 +8,31 @@ The project is designed for long-term personal use: predictable scheduled execut
 
 ## Features
 
-- **Multi-source collection** — Hacker News, recently active GitHub repositories, 36Kr, WallStreetCN, Zhihu, V2EX and configurable RSS/Atom feeds. Collectors run in parallel; an individual source failure does not stop the others.
+- **Registry-based collection** — Hacker News, recently active GitHub repositories, 36Kr, WallStreetCN, Zhihu, V2EX and configurable RSS/Atom feeds are registered through a collector registry. Collectors run in parallel; an individual source failure does not stop the others. Each run records per-collector item counts and success status.
 - **Normalization and ranking** — validates HTTP(S) URLs, applies a rolling 24-hour publication window, deduplicates normalized URL/title pairs, and ranks items using source weight, recency, engagement and content completeness.
 - **AI event curation** — DeepSeek groups reports about the same underlying event, assigns an importance score, and generates a Chinese factual summary, impact analysis and follow-up point.
 - **Evidence-aware summaries** — distinguishes media reports, multi-source reports, unverified claims and analysis. High-risk personal or criminal allegations are marked as unverified.
 - **Source traceability** — model-generated source IDs must match items collected in the current run. Displayed source names and URLs are restored from collector records rather than trusted from model output.
 - **Deterministic fallback** — if DeepSeek is unavailable or its output fails validation, the bot displays up to 12 eligible Chinese-language items without AI cross-source clustering or analysis.
-- **Telegram delivery** — escapes HTML, validates outgoing links and splits messages at complete content-block boundaries below Telegram's 4096-character limit.
+- **Channel-based delivery** — delivery channels follow a shared contract (`name`, `validateConfig()`, `deliver()`). Telegram is the currently enabled channel; the job can accept additional compliant channels without changing the collection and curation pipeline. Telegram delivery escapes HTML, validates outgoing links and splits messages at complete content-block boundaries below Telegram's 4096 characters.
 - **Optional persistent state** — Upstash Redis REST stores daily run state, delivery checkpoints, locks and recent-event history. Redis is optional; no Redis server is required for the basic deployment.
 - **Digest context** — the header can include weather, USD/CNY exchange rate and Bitcoin price/change. Header data sources are independent, so one unavailable API does not suppress the rest.
+
+## Architecture
+
+The code is organized by responsibility:
+
+| Path | Responsibility |
+| --- | --- |
+| `api/cron.js` | HTTP entry point, GET check and Bearer-token authentication |
+| `src/jobs/` | Daily job orchestration, run claiming, delivery sequencing and completion |
+| `src/collectors/` | Collector implementations and the collector registry |
+| `src/services/` | News normalization/ranking, AI curation, header data and state storage |
+| `src/channels/` | Shared channel contract and channel-specific formatting/delivery adapters |
+| `src/utils/` | Shared date, HTTP and weather utilities |
+| `test/` | Automated tests for collectors, delivery contracts, job states and reliability behavior |
+
+To add a news source, implement a collector and register it in `src/collectors/index.js`. To add a delivery destination, implement `validateConfig()` and `deliver(digest, { onSent })`, return `{ messageCount }`, and inject/register the channel in the job configuration. A channel's `onSent` callback should report acknowledged message progress so it can be checkpointed. The current production configuration still uses Telegram only; no other delivery integration is included or enabled.
 
 ## Processing flow
 
@@ -40,10 +56,13 @@ DeepSeek event curation (or local fallback)
 Validate source IDs -> restore trusted source metadata
     |
     v
-Build Telegram HTML -> split messages -> send sequentially
+Validate configured channels -> deliver sequentially
     |
     v
-Persist acknowledged-message count -> mark sent -> save recent-event history
+Persist per-channel acknowledged-message counts and states
+    |
+    v
+Mark all channels sent -> save recent-event history
               (Redis optional)
 ```
 
@@ -143,6 +162,14 @@ With Redis configured:
 - After every message is acknowledged, the run is marked `sent` before recent-event history is saved. A history-write failure therefore does not cause the digest to be sent again that day.
 
 These mechanisms reduce duplicate-delivery risk; they do not guarantee exactly-once delivery across all infrastructure failures.
+
+### Channel state and partial delivery
+
+- The job validates the configuration of every configured channel before starting the first delivery, so a missing destination configuration is detected before any channel is sent a digest.
+- Channels are delivered sequentially. Their run-level states include `pending`, `sending`, `sent`, `rejected` and `delivery_unknown`; acknowledged message counts are checkpointed through the state store.
+- If a channel explicitly rejects delivery before any message has been acknowledged by any channel, the run can be released for a retry.
+- If an earlier channel has already acknowledged messages and a later channel fails, or if delivery outcome is ambiguous, the run is retained as `delivery_unknown` rather than automatically replaying the entire digest. Check each destination before manually retrying.
+- Channel state is part of the daily run record; this is not a separate permanent per-channel audit-history system.
 
 ## Data and content limitations
 
