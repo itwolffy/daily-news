@@ -45,8 +45,6 @@ async function claimDailyRun(day) {
     return token;
   }
 
-  // Check the previous state and acquire the lock in one Redis transaction.
-  // This prevents a failed state write from leaving an orphaned lock.
   const script = [
     "local previous = redis.call('GET', KEYS[2])",
     'if previous then',
@@ -67,8 +65,6 @@ async function claimDailyRun(day) {
       token, '7200', JSON.stringify(initialState), '172800'
     ]);
   } catch (error) {
-    // The Redis script may have executed even if its HTTP response was lost.
-    // Best-effort compare-and-delete avoids leaving an unowned lock behind.
     try {
       await releaseDailyRun(day, token);
     } catch (releaseError) {
@@ -81,39 +77,76 @@ async function claimDailyRun(day) {
 
 async function updateDailyRun(day, token, progress) {
   const key = keys(day);
-  const state = { ...progress, updatedAt: new Date().toISOString() };
   if (!config()) {
     if (locks.get(key.lock) !== token) throw new Error('Daily run lock ownership lost');
-    runStates.set(key.state, state);
+    const previous = runStates.get(key.state) || {};
+    runStates.set(key.state, {
+      ...previous,
+      ...progress,
+      updatedAt: new Date().toISOString()
+    });
     return true;
   }
+
   const script = [
     "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end",
-    "redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])",
+    "local raw = redis.call('GET', KEYS[2])",
+    'local state = {}',
+    'if raw then',
+    '  local ok, decoded = pcall(cjson.decode, raw)',
+    '  if not ok then return -1 end',
+    '  state = decoded',
+    'end',
+    'local patch = cjson.decode(ARGV[2])',
+    'for key, value in pairs(patch) do state[key] = value end',
+    'state.updatedAt = ARGV[3]',
+    "redis.call('SET', KEYS[2], cjson.encode(state), 'EX', ARGV[4])",
     'return 1'
   ].join('\n');
-  const result = await command(['EVAL', script, '2', key.lock, key.state, token, JSON.stringify(state), '172800']);
-  if (Number(result) !== 1) throw new Error('Daily run lock ownership lost');
+  const result = Number(await command([
+    'EVAL', script, '2', key.lock, key.state,
+    token, JSON.stringify(progress), new Date().toISOString(), '172800'
+  ]));
+  if (result === -1) throw new Error('Daily run state contains invalid JSON');
+  if (result !== 1) throw new Error('Daily run lock ownership lost');
   return true;
 }
 
 async function completeDailyRun(day, token) {
   const key = keys(day);
-  const state = { status: 'completed', sentMessageCount: null, updatedAt: new Date().toISOString() };
   if (!config()) {
     if (locks.get(key.lock) !== token) throw new Error('Daily run lock ownership lost');
-    runStates.set(key.state, state);
+    const previous = runStates.get(key.state) || {};
+    runStates.set(key.state, {
+      ...previous,
+      status: 'completed',
+      updatedAt: new Date().toISOString()
+    });
     locks.set(key.lock, 'done');
     return true;
   }
+
   const script = [
     "if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end",
-    "redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])",
+    "local raw = redis.call('GET', KEYS[2])",
+    'local state = {}',
+    'if raw then',
+    '  local ok, decoded = pcall(cjson.decode, raw)',
+    '  if not ok then return -1 end',
+    '  state = decoded',
+    'end',
+    "state.status = 'completed'",
+    'state.updatedAt = ARGV[2]',
+    "redis.call('SET', KEYS[2], cjson.encode(state), 'EX', ARGV[3])",
     "redis.call('SET', KEYS[1], 'done', 'EX', ARGV[3])",
     'return 1'
   ].join('\n');
-  const result = await command(['EVAL', script, '2', key.lock, key.state, token, JSON.stringify(state), '172800']);
-  if (Number(result) !== 1) throw new Error('Daily run lock ownership lost');
+  const result = Number(await command([
+    'EVAL', script, '2', key.lock, key.state,
+    token, new Date().toISOString(), '172800'
+  ]));
+  if (result === -1) throw new Error('Daily run state contains invalid JSON');
+  if (result !== 1) throw new Error('Daily run lock ownership lost');
   return true;
 }
 
@@ -122,7 +155,8 @@ async function releaseDailyRun(day, token) {
   if (!config()) {
     if (locks.get(key.lock) === token) {
       locks.delete(key.lock);
-      runStates.delete(key.state);
+      // Preserve the rejected state: it is useful for diagnostics and remains
+      // claimable because claimDailyRun does not block status "rejected".
       return true;
     }
     return false;
@@ -145,13 +179,15 @@ async function getRecentEvents() {
 
 async function saveRecentEvents(events, day) {
   if (!config()) return;
-  // Do not overwrite the history with a partial snapshot when the Redis read fails.
   const value = await command(['GET', 'daily-news:recent-events']);
   const previous = value ? JSON.parse(value) : [];
   if (!Array.isArray(previous)) throw new Error('Stored recent-event history is not an array');
+
+  // A retry after a lost Redis response must not append the same day's events twice.
+  const withoutThisDay = previous.filter(event => event.date !== day);
   const next = events.map(event => ({
     title: event.title, category: event.category, summary: event.summary, date: day
-  })).concat(previous).slice(0, 80);
+  })).concat(withoutThisDay).slice(0, 80);
   await command(['SET', 'daily-news:recent-events', JSON.stringify(next), 'EX', 1209600]);
 }
 
