@@ -8,13 +8,13 @@ const DEFAULT_FEEDS = [
 
 function decodeXml(value = '') {
   return String(value)
-    .replace(/<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>/g, '$1')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&apos;|&#39;/g, "'")
-    .replace(/&#(x[\\da-f]+|\\d+);/gi, (_, code) => {
+    .replace(/&#(x[\da-f]+|\d+);/gi, (_, code) => {
       const number = code[0].toLowerCase() === 'x'
         ? parseInt(code.slice(1), 16)
         : Number(code);
@@ -23,20 +23,19 @@ function decodeXml(value = '') {
 }
 
 function getTag(block, name) {
-  const escaped = name.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&');
   const match = block.match(new RegExp(
-    '<(?:[\\w.-]+:)?' + escaped + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?' + escaped + '\\s*>',
+    '<(?:[\\w.-]+:)?' + name + '(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?' + name + '\\s*>',
     'i'
   ));
   return match ? decodeXml(match[1].replace(/<[^>]+>/g, ' ').trim()) : '';
 }
 
 function getLink(entry) {
-  const links = [...entry.matchAll(/<(?:[\\w.-]+:)?link\\b([^>]*)>([\\s\\S]*?)<\\/(?:[\\w.-]+:)?link\\s*>|<(?:[\\w.-]+:)?link\\b([^>]*)\\/?\\s*>/gi)];
+  const links = [...entry.matchAll(/<(?:[\w.-]+:)?link\b([^>]*)>([\s\S]*?)<\/(?:[\w.-]+:)?link\s*>|<(?:[\w.-]+:)?link\b([^>]*)\/?\s*>/gi)];
   const atomLinks = links.map(match => {
     const attributes = match[1] || match[3] || '';
-    const href = attributes.match(/\\bhref\\s*=\\s*["']([^"']+)["']/i);
-    const rel = attributes.match(/\\brel\\s*=\\s*["']([^"']+)["']/i);
+    const href = attributes.match(/\bhref\s*=\s*["']([^"']+)["']/i);
+    const rel = attributes.match(/\brel\s*=\s*["']([^"']+)["']/i);
     return { url: href ? href[1] : decodeXml(match[2] || ''), rel: rel ? rel[1] : '' };
   }).filter(link => link.url);
   const preferred = atomLinks.find(link => link.rel === 'alternate') || atomLinks[0];
@@ -45,7 +44,7 @@ function getLink(entry) {
 
 function parseFeed(xml, feed) {
   const source = String(xml || '');
-  const entries = source.match(/<(item|entry)\\b[^>]*>[\\s\\S]*?<\\/\\1\\s*>/gi) || [];
+  const entries = source.match(/<(item|entry)\b[^>]*>[\s\S]*?<\/\1\s*>/gi) || [];
   return entries.slice(0, 12).map((entry, index) => {
     const title = getTag(entry, 'title');
     const url = getLink(entry);
