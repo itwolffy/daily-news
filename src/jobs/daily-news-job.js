@@ -192,6 +192,33 @@ function createDailyNewsJob(dependencies = {}) {
         } else if (sentStatePersisted) {
           // All channels were sent; a history write or completion write failed.
           // Keep the sent state and lock to prevent replay.
+        } else if (error.deliveryOutcome === 'not_started') {
+          // Local preparation (for example Telegram formatting) failed before
+          // any external request. Persist a retryable state before releasing.
+          if (activeChannel) {
+            channelStates[activeChannel.name] = {
+              status: 'pending',
+              sentMessageCount: 0
+            };
+          }
+          let failedStatePersisted = false;
+          try {
+            await stateStore.updateDailyRun(dateKey, lockToken, {
+              status: 'failed_before_delivery',
+              sentMessageCount: 0,
+              channelStates: { ...channelStates }
+            });
+            failedStatePersisted = true;
+          } catch (stateError) {
+            console.error('[DeliveryStateError]', stateError.message);
+          }
+          if (failedStatePersisted) {
+            try {
+              await stateStore.releaseDailyRun(dateKey, lockToken);
+            } catch (releaseError) {
+              console.error('[LockReleaseError]', releaseError.message);
+            }
+          }
         } else if (deliveryStarted && !definitelyRejectedBeforeAnyDelivery) {
           if (activeChannel) {
             channelStates[activeChannel.name] = {
