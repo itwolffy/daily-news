@@ -251,3 +251,26 @@ test('a later channel rejection after an earlier channel succeeded keeps the who
   assert.equal(finalState.sentMessageCount, 1);
   assert.equal(calls.includes('releaseDailyRun'), false);
 });
+
+
+test('failure before the external delivery attempt is retryable and not marked delivery_unknown', async () => {
+  const { deps, updates, calls } = createDependencies({
+    telegram: {
+      name: 'telegram',
+      validateConfig: () => {},
+      deliver: async () => {
+        const error = new Error('message formatting failed');
+        error.deliveryOutcome = 'not_started';
+        throw error;
+      }
+    }
+  });
+
+  await assert.rejects(createDailyNewsJob(deps)(), /message formatting failed/);
+
+  const finalState = updates.at(-1);
+  assert.equal(finalState.status, 'failed_before_delivery');
+  assert.equal(finalState.channelStates.telegram.status, 'pending');
+  assert.equal(calls.includes('releaseDailyRun'), true);
+  assert.equal(updates.some(state => state.status === 'delivery_unknown'), false);
+});
