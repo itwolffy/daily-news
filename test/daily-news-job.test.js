@@ -56,6 +56,7 @@ test('daily job completes after the channel acknowledges delivery', async () => 
 test('daily job preserves the lock when delivery outcome is unknown', async () => {
   const { deps, updates, calls } = createDependencies({
     telegram: {
+      name: 'telegram',
       validateConfig: () => {},
       deliver: async () => {
         const error = new Error('network timeout');
