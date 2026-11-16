@@ -15,6 +15,7 @@ function createDependencies(overrides = {}) {
     redisEnabled: () => true
   };
   const telegram = {
+    name: 'telegram',
     validateConfig: () => calls.push('validateConfig'),
     deliver: async (_digest, { onSent }) => {
       await onSent(1);
@@ -47,13 +48,15 @@ test('daily job completes after the channel acknowledges delivery', async () => 
 
   assert.equal(result.success, true);
   assert.equal(result.message_count, 1);
-  assert.deepEqual(updates.map(x => x.status), ['processing', 'sending', 'sending', 'sent']);
+  assert.equal(result.channel_results.telegram.status, 'sent');
+  assert.deepEqual(updates.map(x => x.status), ['processing', 'sending', 'sending', 'sending', 'sent']);
   assert.deepEqual(calls, ['validateConfig', 'saveRecentEvents', 'completeDailyRun']);
 });
 
 test('daily job preserves the lock when delivery outcome is unknown', async () => {
   const { deps, updates, calls } = createDependencies({
     telegram: {
+      name: 'telegram',
       validateConfig: () => {},
       deliver: async () => {
         const error = new Error('network timeout');
@@ -81,4 +84,52 @@ test('daily job reports a conflict when another run already owns the daily claim
 
   await assert.rejects(run(), error => error.statusCode === 409);
   assert.equal(updates.length, 0);
+});
+
+test('daily job records channel-level delivery state and continues to the next channel', async () => {
+  const { deps, updates } = createDependencies({
+    channels: [
+      {
+        name: 'telegram',
+        validateConfig: () => {},
+        deliver: async (_digest, { onSent }) => {
+          await onSent(1);
+          return { messageCount: 1 };
+        }
+      },
+      {
+        name: 'secondary',
+        validateConfig: () => {},
+        deliver: async (_digest, { onSent }) => {
+          await onSent(2);
+          return { messageCount: 2 };
+        }
+      }
+    ]
+  });
+  const result = await createDailyNewsJob(deps)();
+  assert.equal(result.message_count, 3);
+  assert.equal(result.channel_results.telegram.status, 'sent');
+  assert.equal(result.channel_results.secondary.status, 'sent');
+  assert.ok(updates.some(state => state.channelStates &&
+    state.channelStates.telegram.status === 'sent' &&
+    state.channelStates.secondary.status === 'sending'));
+});
+
+test('definite rejection is recorded per channel and releases the run for retry', async () => {
+  const { deps, updates, calls } = createDependencies({
+    telegram: {
+      name: 'telegram',
+      validateConfig: () => {},
+      deliver: async () => {
+        const error = new Error('rejected');
+        error.deliveryOutcome = 'rejected';
+        throw error;
+      }
+    }
+  });
+  await assert.rejects(createDailyNewsJob(deps)(), /rejected/);
+  assert.equal(updates.at(-1).status, 'rejected');
+  assert.equal(updates.at(-1).channelStates.telegram.status, 'rejected');
+  assert.ok(calls.includes('releaseDailyRun'));
 });
