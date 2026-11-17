@@ -5,6 +5,7 @@ const { fetchHeaderBar } = require('../services/header');
 const { beijingHeader, beijingDate } = require('../utils/date');
 const store = require('../services/state-store');
 const telegram = require('../channels/telegram');
+const pushplus = require('../channels/pushplus');
 const { assertChannel, assertDeliveryResult } = require('../channels/contract');
 
 function createDailyNewsJob(dependencies = {}) {
@@ -18,6 +19,7 @@ function createDailyNewsJob(dependencies = {}) {
     beijingDate,
     store,
     telegram,
+    pushplus,
     channels: null,
     ...dependencies
   };
@@ -31,7 +33,9 @@ function createDailyNewsJob(dependencies = {}) {
     beijingDate: getDateKey,
     store: stateStore
   } = deps;
-  const channels = (deps.channels || [deps.telegram]).map(assertChannel);
+  const defaultChannels = [deps.telegram];
+  if (deps.pushplus.isConfigured()) defaultChannels.push(deps.pushplus);
+  const channels = (deps.channels || defaultChannels).map(assertChannel);
   const channelNames = new Set(channels.map(channel => channel.name));
   if (channelNames.size !== channels.length) throw new Error('Channel names must be unique');
 
