@@ -12,15 +12,21 @@ async function deliver(digest, { onSent } = {}) {
   }
 
   validateConfig();
-  // PushPlus accepts one HTML body; keep the formatter's complete content blocks.
-  await sendPushPlus({
-    title: '每日智能早报 · ' + digest.dateHeader,
-    content: messages.join('<hr/>')
-  });
+  let acceptedCount = 0;
+  for (let index = 0; index < messages.length; index += 1) {
+    // Submit chunks separately to stay within PushPlus content limits.
+    await sendPushPlus({
+      title: '每日智能早报 · ' + digest.dateHeader +
+        (messages.length > 1 ? ' (' + (index + 1) + '/' + messages.length + ')' : ''),
+      content: messages[index]
+    });
 
-  // This confirms PushPlus accepted the request, not that WeChat displayed it.
-  if (onSent) await onSent(1);
-  return { messageCount: 1 };
+    acceptedCount += 1;
+    // This confirms PushPlus accepted the request, not that WeChat displayed it.
+    if (onSent) await onSent(acceptedCount);
+  }
+
+  return { messageCount: acceptedCount };
 }
 
 function isConfigured() {
