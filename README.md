@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A personal, automated daily news digest built with Vercel Cron, DeepSeek and Telegram. It collects updates from technology, AI, business, finance and developer communities, turns related reports into structured events, and delivers a Simplified Chinese briefing to a Telegram chat, and optionally to a WeChat account through PushPlus.
+A personal, automated daily news digest built with Vercel Cron, DeepSeek and Telegram. It collects updates from technology, AI, business, finance and developer communities, turns related reports into structured events, and delivers a Simplified Chinese briefing to a Telegram chat and, optionally, to a WeChat account through PushPlus.
 
 The project is designed for long-term personal use: predictable scheduled execution, source traceability, duplicate-risk reduction and explicit handling of uncertain delivery outcomes.
 
@@ -156,7 +156,7 @@ With Redis configured:
 
 ### Telegram and PushPlus delivery
 
-- Telegram messages are sent sequentially; PushPlus submits the full digest as one HTML message.
+- Telegram messages are sent sequentially; PushPlus reuses the digest HTML formatter and submits its content chunks separately.
 - After Telegram acknowledges each message, the acknowledged-message count is persisted.
 - A known Telegram 4xx rejection is treated as an explicit rejection. HTTP 429 responses receive bounded retries when the requested wait is no more than 10 seconds.
 - PushPlus uses asynchronous acceptance: a successful API response means PushPlus accepted the request, not that the WeChat client received or displayed it. Network/server errors may occur after upstream acceptance, so the outcome can be ambiguous.\n- Network errors and server-side errors have an ambiguous outcome: Telegram may have accepted a message before the connection failed. Such runs are marked `delivery_unknown` and are not automatically retried. Check the destination chat before any manual retry; Telegram `sendMessage` does not provide a general idempotency key.
