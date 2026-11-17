@@ -44,7 +44,7 @@ async function sendPushPlus({ title, content }) {
 
   if (!response.data || Number(response.data.code) !== 200) {
     throw pushplusError(
-      'PushPlus rejected the request: ' + String(response.data && response.data.msg || 'invalid response'),
+      'PushPlus rejected the request (code ' + String(response.data && response.data.code) + '): ' + String(response.data && response.data.msg || 'invalid response'),
       'rejected'
     );
   }
