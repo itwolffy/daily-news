@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-一个面向个人长期使用的自动化新闻早报项目。项目通过 Vercel Cron 定时采集科技、人工智能、商业、金融和开发者社区新闻，使用 DeepSeek 将相关报道整理为结构化事件，最终通过 Telegram 推送简体中文早报。
+一个面向个人长期使用的自动化新闻早报项目。项目通过 Vercel Cron 定时采集科技、人工智能、商业、金融和开发者社区新闻，使用 DeepSeek 将相关报道整理为结构化事件，最终通过 Telegram 推送简体中文早报；配置 PushPlus Token 后，也可同时推送到绑定的微信账号。
 
 项目重点不是单纯聚合新闻，而是尽量做到定时执行、来源可追溯、降低重复推送风险，并明确处理推送结果不确定的情况。
 
@@ -14,7 +14,7 @@
 - **证据状态约束**：区分媒体报道、多来源报道、未经独立核实和分析判断。涉及个人指控或刑事等高风险内容时标记为“未经独立核实”。
 - **来源可追溯**：模型返回的来源 ID 必须对应本次采集结果。最终展示的来源名称和 URL 使用采集器中的可信数据，不使用模型生成的链接。
 - **本地降级**：未配置 DeepSeek Key、请求失败或模型输出未通过校验时，使用本地规则降级，最多展示 12 条符合中文要求的新闻；不执行 AI 跨来源事件聚合、分析和排序。
-- **统一渠道交付**：推送渠道遵循统一契约（`name`、`validateConfig()`、`deliver()`）。当前实际启用的渠道仍为 Telegram，后续可在不修改采集和新闻整理流程的情况下接入符合契约的新渠道。Telegram 会转义 HTML、校验外发链接，并按完整内容块拆分消息，控制在单条 4096 字符以内。
+- **统一渠道交付**：推送渠道遵循统一契约（`name`、`validateConfig()`、`deliver()`）。Telegram 默认启用；配置 `PUSHPLUS_TOKEN` 后自动增加 PushPlus 微信公众号渠道，无需修改采集和新闻整理流程。PushPlus 的 API 成功响应表示平台已受理请求，不代表微信客户端已实际展示消息。Telegram 会转义 HTML、校验外发链接，并按完整内容块拆分消息，控制在单条 4096 字符以内。
 - **可选 Redis 状态存储**：配置 Upstash Redis REST 后，可持久化每日任务状态、任务锁、推送进度和近期事件历史。不配置 Redis 也可以运行基础流程，无需额外部署 Redis 服务。
 - **早报头部信息**：可展示天气、美元兑人民币汇率和比特币价格及 24 小时涨跌幅。各数据源独立获取，单个接口不可用不会影响其他信息。
 
@@ -95,6 +95,7 @@ Cron 表达式为 `0 1 * * *`，即每天 **01:00 UTC（北京时间 09:00）** 
 | `CRON_SECRET` | Cron 接口访问密钥。请求必须携带 `Authorization: Bearer <CRON_SECRET>` 请求头。 |
 | `TG_BOT_TOKEN` | Telegram Bot Token。 |
 | `TG_CHAT_ID` | 接收早报的 Telegram Chat ID。 |
+| `PUSHPLUS_TOKEN` | 可选。配置后启用 PushPlus 微信公众号推送；不配置时仅使用 Telegram。 |
 
 #### 可选变量
 
@@ -153,12 +154,12 @@ curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
 - 近期事件历史保留 14 天，最多保存 80 条。
 - 更新和释放锁时会校验随机所有权 Token。
 
-### Telegram 推送
+### Telegram 与 PushPlus 推送
 
-- 消息按顺序逐条发送。
+- Telegram 消息按顺序逐条发送；PushPlus 将完整早报作为一条 HTML 消息提交。
 - 每成功收到 Telegram 对一条消息的确认，就持久化已确认的消息数量。
 - Telegram 4xx 响应视为明确拒绝；HTTP 429 在要求等待时间不超过 10 秒时进行有限次数重试。
-- 网络错误和服务端错误可能发生在 Telegram 已接收消息之后，推送结果因此无法确定。此类任务会标记为 `delivery_unknown`，不会自动重试。手动重试前应先检查目标 Telegram 聊天记录；Telegram `sendMessage` 不提供通用幂等键。
+- PushPlus 接口为异步受理：HTTP/API 成功仅代表 PushPlus 接受请求，不代表微信客户端最终收到或展示。网络错误和服务端错误可能发生在上游已受理请求之后，结果因此无法确定。\n- 网络错误和服务端错误也可能发生在 Telegram 已接收消息之后，推送结果因此无法确定。此类任务会标记为 `delivery_unknown`，不会自动重试。手动重试前应先检查目标 Telegram 聊天记录；Telegram `sendMessage` 不提供通用幂等键。
 - 所有渠道均确认发送成功后，任务会先标记为 `sent`，同时记录 `historyStatus: pending` 和待保存的事件数据，再写入近期事件历史。历史写入失败不会导致当天早报重新发送；待写入数据会保留在每日任务状态中，供人工排查和恢复；当前不会自动重试这一步历史写入。
 
 这些机制用于降低重复推送风险，但不能保证所有基础设施故障场景下都实现严格的 Exactly-once 投递。
@@ -188,7 +189,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
 | --- | --- |
 | `newsCount` | 预处理后的新闻数量 |
 | `eventCount` | 整理后的事件数量 |
-| `messageCount` | Telegram 推送消息条数 |
+| `messageCount` | 各渠道确认的消息/请求数量；PushPlus 计数表示平台受理请求，不代表微信最终送达 |
 | `aiCurated` | 本次是否成功使用 AI 整理 |
 | `redis` | 当前是否启用了 Redis 配置 |
 | `collectorStats` | 各采集器的新闻数量和执行状态 |
@@ -201,4 +202,4 @@ curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
 - Telegram HTML 内容经过转义，外发链接仅允许 HTTP(S)。
 - AI 输出经过结构校验，来源 ID 必须对应本次采集记录。
 - 不向接口调用方返回上游原始错误或敏感凭据。
-- 不要将 `CRON_SECRET`、Telegram 凭据、DeepSeek API Key 或 Redis Token 提交到 Git，也不要在日志中输出这些凭据。
+- 不要将 `CRON_SECRET`、Telegram 凭据、PushPlus Token、DeepSeek API Key 或 Redis Token 提交到 Git，也不要在日志中输出这些凭据。
