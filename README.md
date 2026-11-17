@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-A personal, automated daily news digest built with Vercel Cron, DeepSeek and Telegram. It collects updates from technology, AI, business, finance and developer communities, turns related reports into structured events, and delivers a Simplified Chinese briefing to a Telegram chat.
+A personal, automated daily news digest built with Vercel Cron, DeepSeek and Telegram. It collects updates from technology, AI, business, finance and developer communities, turns related reports into structured events, and delivers a Simplified Chinese briefing to a Telegram chat, and optionally to a WeChat account through PushPlus.
 
 The project is designed for long-term personal use: predictable scheduled execution, source traceability, duplicate-risk reduction and explicit handling of uncertain delivery outcomes.
 
@@ -14,7 +14,7 @@ The project is designed for long-term personal use: predictable scheduled execut
 - **Evidence-aware summaries** — distinguishes media reports, multi-source reports, unverified claims and analysis. High-risk personal or criminal allegations are marked as unverified.
 - **Source traceability** — model-generated source IDs must match items collected in the current run. Displayed source names and URLs are restored from collector records rather than trusted from model output.
 - **Deterministic fallback** — if DeepSeek is unavailable or its output fails validation, the bot displays up to 12 eligible Chinese-language items without AI cross-source clustering or analysis.
-- **Channel-based delivery** — delivery channels follow a shared contract (`name`, `validateConfig()`, `deliver()`). Telegram is the currently enabled channel; the job can accept additional compliant channels without changing the collection and curation pipeline. Telegram delivery escapes HTML, validates outgoing links and splits messages at complete content-block boundaries below Telegram's 4096 characters.
+- **Channel-based delivery** — delivery channels follow a shared contract (`name`, `validateConfig()`, `deliver()`). Telegram is enabled by default. Setting `PUSHPLUS_TOKEN` also enables the PushPlus WeChat Official Account channel without changing collection or curation. Telegram delivery escapes HTML, validates outgoing links and splits messages at complete content-block boundaries below Telegram's 4096 characters.
 - **Optional persistent state** — Upstash Redis REST stores daily run state, delivery checkpoints, locks and recent-event history. Redis is optional; no Redis server is required for the basic deployment.
 - **Digest context** — the header can include weather, USD/CNY exchange rate and Bitcoin price/change. Header data sources are independent, so one unavailable API does not suppress the rest.
 
@@ -32,7 +32,7 @@ The code is organized by responsibility:
 | `src/utils/` | Shared date, HTTP and weather utilities |
 | `test/` | Automated tests for collectors, delivery contracts, job states and reliability behavior |
 
-To add a news source, implement a collector and register it in `src/collectors/index.js`. To add a delivery destination, implement `validateConfig()` and `deliver(digest, { onSent })`, return `{ messageCount }`, and inject/register the channel in the job configuration. A channel's `onSent` callback should report acknowledged message progress so it can be checkpointed. The current production configuration still uses Telegram only; no other delivery integration is included or enabled.
+To add a news source, implement a collector and register it in `src/collectors/index.js`. To add a delivery destination, implement `validateConfig()` and `deliver(digest, { onSent })`, return `{ messageCount }`, and inject/register the channel in the job configuration. A channel's `onSent` callback should report acknowledged message progress so it can be checkpointed. PushPlus is opt-in and remains disabled when `PUSHPLUS_TOKEN` is absent. A successful PushPlus API response means the platform accepted the request, not that WeChat displayed the message.
 
 ## Processing flow
 
@@ -72,7 +72,7 @@ Mark all channels sent -> save recent-event history
 
 - Node.js 20+
 - A Vercel project connected to this repository
-- A Telegram bot and destination chat
+- A Telegram bot and destination chat; a PushPlus account/token is optional
 - A DeepSeek API key for AI curation (optional; fallback mode works without it)
 
 ### Setup
@@ -95,6 +95,7 @@ The Cron expression is `0 1 * * *`: every day at **01:00 UTC (09:00 Asia/Shangha
 | `CRON_SECRET` | Random secret protecting the Cron endpoint. Requests must use `Authorization: Bearer <CRON_SECRET>`. |
 | `TG_BOT_TOKEN` | Telegram Bot token. |
 | `TG_CHAT_ID` | Destination Telegram chat ID. |
+| `PUSHPLUS_TOKEN` | Optional. Enables PushPlus WeChat delivery when set; otherwise Telegram remains the only channel. |
 
 #### Optional
 
@@ -110,7 +111,7 @@ The Cron expression is `0 1 * * *`: every day at **01:00 UTC (09:00 Asia/Shangha
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Optional Upstash Redis REST credentials. The compatible `KV_REST_API_URL` and `KV_REST_API_TOKEN` pair is also supported. Configure both values from one pair. |
 | `HTTP_TIMEOUT_MS` | Collector HTTP timeout in milliseconds; defaults to `8000`. |
 
-Never commit secrets to the repository. Store production credentials in Vercel Environment Variables.
+Never commit secrets to the repository. Keep `PUSHPLUS_TOKEN` private alongside the other credentials. Store production credentials in Vercel Environment Variables.
 
 ## Local development
 
@@ -153,12 +154,12 @@ With Redis configured:
 - Recent-event history is retained for 14 days and capped at 80 events.
 - Lock updates and release operations verify a random ownership token.
 
-### Telegram delivery
+### Telegram and PushPlus delivery
 
-- Messages are sent sequentially.
+- Telegram messages are sent sequentially; PushPlus submits the full digest as one HTML message.
 - After Telegram acknowledges each message, the acknowledged-message count is persisted.
 - A known Telegram 4xx rejection is treated as an explicit rejection. HTTP 429 responses receive bounded retries when the requested wait is no more than 10 seconds.
-- Network errors and server-side errors have an ambiguous outcome: Telegram may have accepted a message before the connection failed. Such runs are marked `delivery_unknown` and are not automatically retried. Check the destination chat before any manual retry; Telegram `sendMessage` does not provide a general idempotency key.
+- PushPlus uses asynchronous acceptance: a successful API response means PushPlus accepted the request, not that the WeChat client received or displayed it. Network/server errors may occur after upstream acceptance, so the outcome can be ambiguous.\n- Network errors and server-side errors have an ambiguous outcome: Telegram may have accepted a message before the connection failed. Such runs are marked `delivery_unknown` and are not automatically retried. Check the destination chat before any manual retry; Telegram `sendMessage` does not provide a general idempotency key.
 - After every channel has acknowledged delivery, the run is marked `sent` with a `historyStatus: pending` checkpoint and the events needed for history persistence. A history-write failure therefore does not cause the digest to be sent again. The daily run record retains the pending history payload for manual diagnosis/recovery; the application does not automatically retry this history write.
 
 These mechanisms reduce duplicate-delivery risk; they do not guarantee exactly-once delivery across all infrastructure failures.
