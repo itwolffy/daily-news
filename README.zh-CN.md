@@ -156,7 +156,7 @@ curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron
 
 ### Telegram 与 PushPlus 推送
 
-- Telegram 消息按顺序逐条发送；PushPlus 将完整早报作为一条 HTML 消息提交。
+- Telegram 消息按顺序逐条发送；PushPlus 复用早报 HTML 格式化结果，并按内容块分段提交。
 - 每成功收到 Telegram 对一条消息的确认，就持久化已确认的消息数量。
 - Telegram 4xx 响应视为明确拒绝；HTTP 429 在要求等待时间不超过 10 秒时进行有限次数重试。
 - PushPlus 接口为异步受理：HTTP/API 成功仅代表 PushPlus 接受请求，不代表微信客户端最终收到或展示。网络错误和服务端错误可能发生在上游已受理请求之后，结果因此无法确定。\n- 网络错误和服务端错误也可能发生在 Telegram 已接收消息之后，推送结果因此无法确定。此类任务会标记为 `delivery_unknown`，不会自动重试。手动重试前应先检查目标 Telegram 聊天记录；Telegram `sendMessage` 不提供通用幂等键。
